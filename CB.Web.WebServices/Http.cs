@@ -12,6 +12,9 @@ namespace CB.Web.WebServices
         public static async Task<TResult> DeleteAsync<TResult>(string url)
             => await DoAsync<TResult>(async client => await client.DeleteAsync(url));
 
+        public static async Task<TResult> DeleteAsync<TResult>(string url, int id)
+            => await DeleteAsync<TResult>($"{url}?id={id}");
+
         public static async Task<TResult> DoAsync<TResult>(
             Func<HttpClient, Task<HttpResponseMessage>> getResponseFunc)
         {
