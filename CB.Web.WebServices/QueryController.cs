@@ -2,6 +2,7 @@
 using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
+using System.Linq;
 using System.Web.Http;
 using CB.Database.SqlServer;
 
@@ -27,7 +28,7 @@ namespace CB.Web.WebServices
 
         #region Methods
         [HttpPost]
-        public DataResult FetchData(DataRequestCollection requestCollection)
+        public DataResult GetData(DataRequestCollection requestCollection)
         {
             switch (requestCollection.QueryStrategy)
             {
@@ -45,11 +46,59 @@ namespace CB.Web.WebServices
 
 
         #region Implementation
-        private DataSet FetchData(DataRequestCollection requestCollection, SqlConnection con, SqlTransaction trans) { }
+        private static void AddCommandParameters(SqlCommand cmd, object parameters)
+        {
+            if (parameters == null) return;
+
+            foreach (var propertyInfo in parameters.GetType().GetProperties())
+            {
+                cmd.Parameters.AddWithValue(CreateParameterName(propertyInfo.Name),
+                    propertyInfo.GetValue(parameters));
+            }
+        }
+
+        private static string CreateParameterName(string value)
+        {
+            if (!value.StartsWith("@")) value = "@" + value;
+            return value;
+        }
 
         private static string GetConnectionString(string connectionStringSetting)
         {
             return ConfigurationManager.ConnectionStrings[connectionStringSetting].ConnectionString;
+        }
+
+        private static DataSet GetData(DataRequestCollection requestCollection, SqlConnection con, SqlTransaction trans)
+        {
+            var result = new DataSet();
+            foreach (var ds in requestCollection.Select(request => GetData(request, con, trans)))
+            {
+                MergeDataSet(ds, result);
+            }
+            return result;
+        }
+
+        private static DataSet GetData(DataRequest request, SqlConnection con, SqlTransaction trans)
+        {
+            using (var cmd = new SqlCommand(request.Query, con) { CommandType = CommandType.StoredProcedure })
+            {
+                if (trans != null) cmd.Transaction = trans;
+                AddCommandParameters(cmd, request.Parameters);
+                var ds = new DataSet();
+                using (var adater = new SqlDataAdapter(cmd))
+                {
+                    adater.Fill(ds);
+                    return ds;
+                }
+            }
+        }
+
+        private static void MergeDataSet(DataSet from, DataSet to)
+        {
+            foreach (DataTable table in from.Tables)
+            {
+                to.Tables.Add(table);
+            }
         }
 
         private SqlConnection OpenConnection(string databaseName = null)
@@ -61,9 +110,45 @@ namespace CB.Web.WebServices
             return con;
         }
 
-        private DataResult QueryDataParallely(DataRequestCollection requestCollection) { }
+        private DataResult QueryDataParallely(DataRequestCollection requestCollection)
+        {
+            try
+            {
+                var datasets = requestCollection.AsParallel().Select(request =>
+                {
+                    using (var con = OpenConnection())
+                    {
+                        return GetData(requestCollection, con, null);
+                    }
+                });
+                var result = new DataSet();
+                foreach (var dataset in datasets)
+                {
+                    MergeDataSet(dataset, result);
+                }
+                return new DataResult(result);
+            }
+            catch (Exception exception)
+            {
+                return new DataResult(exception.Message);
+            }
+        }
 
-        private DataResult QueryDataSequentially(DataRequestCollection requestCollection) { }
+        private DataResult QueryDataSequentially(DataRequestCollection requestCollection)
+        {
+            using (var con = OpenConnection())
+            {
+                try
+                {
+                    var ds = GetData(requestCollection, con, null);
+                    return new DataResult(ds);
+                }
+                catch (Exception exception)
+                {
+                    return new DataResult(exception.Message);
+                }
+            }
+        }
 
         private DataResult QueryDataTransactionally(DataRequestCollection requestCollection)
         {
@@ -73,7 +158,7 @@ namespace CB.Web.WebServices
                 {
                     try
                     {
-                        var ds = FetchData(requestCollection, con, trans);
+                        var ds = GetData(requestCollection, con, trans);
                         trans.Commit();
                         return new DataResult(ds);
                     }
@@ -88,3 +173,5 @@ namespace CB.Web.WebServices
         #endregion
     }
 }
+
+// TODO: refactor GetData methods
