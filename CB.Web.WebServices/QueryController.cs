@@ -22,7 +22,7 @@ namespace CB.Web.WebServices
             _connectionString = GetConnectionString(connectionStringSetting);
         }
 
-        public QueryController(): this("queryConnectionString") { }
+        public QueryController(): this("DefaultConnection") { }
         #endregion
 
 
