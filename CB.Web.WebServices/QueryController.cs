@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
@@ -46,14 +47,24 @@ namespace CB.Web.WebServices
 
 
         #region Implementation
-        private static void AddCommandParameters(SqlCommand cmd, object parameters)
+        private static void AddCommandParameters(SqlCommand cmd, Dictionary<string, object> parameters)
         {
+            /*var jParams = parameters as JObject;
+            if (jParams == null) return;
+
+            foreach (var pair in jParams)
+            {
+                cmd.Parameters.AddWithValue(CreateParameterName(pair.Key), pair.Value.Value<object>());
+            }*/
+            /*foreach (var parameter in parameters)
+            {
+                cmd.Parameters.Add(parameter);
+            }*/
             if (parameters == null) return;
 
-            foreach (var propertyInfo in parameters.GetType().GetProperties())
+            foreach (var key in parameters.Keys)
             {
-                cmd.Parameters.AddWithValue(CreateParameterName(propertyInfo.Name),
-                    propertyInfo.GetValue(parameters));
+                cmd.Parameters.AddWithValue(key, parameters[key]);
             }
         }
 
@@ -68,14 +79,16 @@ namespace CB.Web.WebServices
             return ConfigurationManager.ConnectionStrings[connectionStringSetting].ConnectionString;
         }
 
-        private static DataSet GetData(DataRequestCollection requestCollection, SqlConnection con, SqlTransaction trans)
+        private static DataSet[] GetData(DataRequestCollection requestCollection, SqlConnection con,
+            SqlTransaction trans)
         {
-            var result = new DataSet();
+            return requestCollection.Select(request => GetData(request, con, trans)).ToArray();
+            /*var result = new DataSet();
             foreach (var ds in requestCollection.Select(request => GetData(request, con, trans)))
             {
                 MergeDataSet(ds, result);
             }
-            return result;
+            return result;*/
         }
 
         private static DataSet GetData(DataRequest request, SqlConnection con, SqlTransaction trans)
@@ -85,21 +98,21 @@ namespace CB.Web.WebServices
                 if (trans != null) cmd.Transaction = trans;
                 AddCommandParameters(cmd, request.Parameters);
                 var ds = new DataSet();
-                using (var adater = new SqlDataAdapter(cmd))
+                using (var adapter = new SqlDataAdapter(cmd))
                 {
-                    adater.Fill(ds);
+                    adapter.Fill(ds);
                     return ds;
                 }
             }
         }
 
-        private static void MergeDataSet(DataSet from, DataSet to)
+        /*private static void MergeDataSet(DataSet from, DataSet to)
         {
             foreach (DataTable table in from.Tables)
             {
                 to.Tables.Add(table);
             }
-        }
+        }*/
 
         private SqlConnection OpenConnection(string databaseName = null)
         {
@@ -114,7 +127,14 @@ namespace CB.Web.WebServices
         {
             try
             {
-                var datasets = requestCollection.AsParallel().Select(request =>
+                return new DataResult(requestCollection.AsParallel().Select(request =>
+                {
+                    using (var con = OpenConnection())
+                    {
+                        return GetData(request, con, null);
+                    }
+                }).ToArray());
+                /*var datasets = requestCollection.AsParallel().Select(request =>
                 {
                     using (var con = OpenConnection())
                     {
@@ -126,7 +146,7 @@ namespace CB.Web.WebServices
                 {
                     MergeDataSet(dataset, result);
                 }
-                return new DataResult(result);
+                return new DataResult(result);*/
             }
             catch (Exception exception)
             {
@@ -174,4 +194,6 @@ namespace CB.Web.WebServices
     }
 }
 
+
 // TODO: refactor GetData methods
+// TODO: inhibit SQL injection
